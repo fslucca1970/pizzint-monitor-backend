@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { chromium } = require('playwright');
+const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -48,20 +48,19 @@ async function rasparDados() {
     try {
         console.log('🚀 Iniciando raspagem...');
 
-        browser = await chromium.launch({
-    headless: true,
-    executablePath: '/usr/bin/chromium-browser',
-    args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu'
-    ]
-});
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
+        });
 
         const page = await browser.newPage();
         await page.goto('https://www.pizzint.watch', { 
-            waitUntil: 'networkidle',
+            waitUntil: 'networkidle2',
             timeout: 30000 
         });
 
@@ -204,3 +203,4 @@ app.listen(PORT, async () => {
     setInterval(atualizarHistorico, 5 * 60 * 1000);
     console.log('✅ Coletas agendadas a cada 5 minutos');
 });
+
