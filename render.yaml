@@ -2,14 +2,18 @@ services:
   - type: web
     name: pizzint-monitor-backend
     env: node
-    region: oregon
     plan: free
+    region: oregon
+
     buildCommand: |
       apt-get update
+      apt-get install -y wget gnupg ca-certificates
+
+      # Instalar dependências do Chromium
       apt-get install -y \
-        gconf-service \
         libasound2 \
         libatk1.0-0 \
+        libatk-bridge2.0-0 \
         libc6 \
         libcairo2 \
         libcups2 \
@@ -38,13 +42,9 @@ services:
         libxrandr2 \
         libxrender1 \
         libxss1 \
-        libxtst6 \
-        ca-certificates \
-        fonts-liberation \
-        libappindicator3-1 \
-        lsb-release \
-        xdg-utils \
-        wget
+        libxtst6
+
       npm install
-      npx playwright install --with-deps chromium
+      npx playwright install chromium
+
     startCommand: node index.js
