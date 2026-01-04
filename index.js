@@ -7,16 +7,11 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração CORS
 app.use(cors());
 app.use(express.json());
 
-// Caminho do arquivo de histórico
 const HISTORICO_PATH = path.join(__dirname, 'historico.json');
 
-// ========================================
-// FUNÇÃO: Garantir que historico.json existe
-// ========================================
 async function garantirHistorico() {
     try {
         await fs.access(HISTORICO_PATH);
@@ -28,9 +23,6 @@ async function garantirHistorico() {
     }
 }
 
-// ========================================
-// FUNÇÃO: Ler histórico
-// ========================================
 async function lerHistorico() {
     try {
         await garantirHistorico();
@@ -42,9 +34,6 @@ async function lerHistorico() {
     }
 }
 
-// ========================================
-// FUNÇÃO: Salvar histórico
-// ========================================
 async function salvarHistorico(dados) {
     try {
         await fs.writeFile(HISTORICO_PATH, JSON.stringify(dados, null, 2));
@@ -54,9 +43,6 @@ async function salvarHistorico(dados) {
     }
 }
 
-// ========================================
-// FUNÇÃO: Raspar dados do pizzint.watch
-// ========================================
 async function rasparDados() {
     let browser;
     try {
@@ -73,10 +59,8 @@ async function rasparDados() {
             timeout: 30000 
         });
 
-        // Aguardar elementos carregarem
         await page.waitForSelector('.pizzaria-card', { timeout: 10000 });
 
-        // Extrair dados
         const dados = await page.evaluate(() => {
             const pizzarias = {};
             const cards = document.querySelectorAll('.pizzaria-card');
@@ -103,7 +87,6 @@ async function rasparDados() {
 
         await browser.close();
 
-        // Detectar anomalias
         const valores = Object.values(dados).map(p => p.valor);
         const media = valores.reduce((a, b) => a + b, 0) / valores.length;
         const desvio = Math.sqrt(valores.reduce((sum, val) => sum + Math.pow(val - media, 2), 0) / valores.length);
@@ -133,9 +116,6 @@ async function rasparDados() {
     }
 }
 
-// ========================================
-// FUNÇÃO: Atualizar histórico
-// ========================================
 async function atualizarHistorico() {
     try {
         const novosDados = await rasparDados();
@@ -147,7 +127,6 @@ async function atualizarHistorico() {
         const historico = await lerHistorico();
         historico.push(novosDados);
 
-        // Manter apenas últimos 7 dias (288 registros = 7 dias * 24h * 12 coletas/hora)
         const LIMITE = 288;
         if (historico.length > LIMITE) {
             historico.splice(0, historico.length - LIMITE);
@@ -158,5 +137,64 @@ async function atualizarHistorico() {
 
     } catch (error) {
         console.error('❌ Erro ao atualizar histórico:', error);
+    }
+}
 
+app.get('/api/status', async (req, res) => {
+    try {
+        const historico = await lerHistorico();
+        const ultimaColeta = historico.length > 0 
+            ? historico[historico.length - 1].timestamp 
+            : null;
 
+        res.json({
+            status: 'online',
+            ultima_coleta: ultimaColeta,
+            total_historico: historico.length,
+            periodo_historico_dias: 7,
+            proximo_update: 'A cada 5 minutos'
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/pizzas', async (req, res) => {
+    try {
+        const historico = await lerHistorico();
+
+        if (historico.length === 0) {
+            return res.status(404).json({ 
+                error: 'Nenhum dado disponível ainda. Aguarde a primeira coleta.' 
+            });
+        }
+
+        res.json(historico[historico.length - 1]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/historico', async (req, res) => {
+    try {
+        const historico = await lerHistorico();
+        res.json({
+            total: historico.length,
+            registros: historico
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.listen(PORT, async () => {
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+
+    await garantirHistorico();
+
+    console.log('⏳ Iniciando primeira coleta...');
+    await atualizarHistorico();
+
+    setInterval(atualizarHistorico, 5 * 60 * 1000);
+    console.log('✅ Coletas agendadas a cada 5 minutos');
+});
