@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -50,11 +50,12 @@ async function rasparDados() {
 
         browser = await puppeteer.launch({
             headless: true,
+            executablePath: '/usr/bin/chromium',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-dev-shm-usage'
             ]
         });
 
