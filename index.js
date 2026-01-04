@@ -48,16 +48,18 @@ async function rasparDados() {
     try {
         console.log('🚀 Iniciando raspagem...');
 
-        const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome';
+        // Tenta usar o Chromium do Puppeteer (que será baixado automaticamente)
+        const chromiumPath = puppeteer.executablePath ? puppeteer.executablePath() : undefined;
 
         browser = await puppeteer.launch({
             headless: "new",
-            executablePath: executablePath,
+            executablePath: chromiumPath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-gpu',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                '--disable-software-rasterizer'
             ]
         });
 
