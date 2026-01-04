@@ -42,10 +42,9 @@ services:
         ca-certificates \
         fonts-liberation \
         libappindicator3-1 \
-        libnss3 \
         lsb-release \
         xdg-utils \
         wget
       npm install
-      npx playwright install --with-deps
+      npx playwright install --with-deps chromium
     startCommand: node index.js
