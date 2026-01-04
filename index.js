@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -48,12 +48,8 @@ async function rasparDados() {
     try {
         console.log('🚀 Iniciando raspagem...');
 
-        // Tenta usar o Chromium do Puppeteer (que será baixado automaticamente)
-        const chromiumPath = puppeteer.executablePath ? puppeteer.executablePath() : undefined;
-
         browser = await puppeteer.launch({
             headless: "new",
-            executablePath: chromiumPath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -62,6 +58,8 @@ async function rasparDados() {
                 '--disable-software-rasterizer'
             ]
         });
+
+        console.log('✅ Browser lançado com sucesso');
 
         const page = await browser.newPage();
         await page.goto('https://www.pizzint.watch', { 
