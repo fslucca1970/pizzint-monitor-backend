@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -49,14 +50,10 @@ async function rasparDados() {
         console.log('🚀 Iniciando raspagem...');
 
         browser = await puppeteer.launch({
-            headless: "new",
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-                '--disable-software-rasterizer'
-            ]
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless
         });
 
         console.log('✅ Browser lançado com sucesso');
