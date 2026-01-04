@@ -1,317 +1,162 @@
 const express = require('express');
 const cors = require('cors');
 const { chromium } = require('playwright');
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Configuração CORS
 app.use(cors());
 app.use(express.json());
 
-// Arquivo para armazenar histórico
-const HISTORICO_FILE = path.join(__dirname, 'historico.json');
+// Caminho do arquivo de histórico
+const HISTORICO_PATH = path.join(__dirname, 'historico.json');
 
-// Carregar histórico do arquivo (se existir)
-let historico = [];
-if (fs.existsSync(HISTORICO_FILE)) {
+// ========================================
+// FUNÇÃO: Garantir que historico.json existe
+// ========================================
+async function garantirHistorico() {
     try {
-        const data = fs.readFileSync(HISTORICO_FILE, 'utf8');
-        historico = JSON.parse(data);
-        console.log(`✅ Histórico carregado: ${historico.length} registros`);
-    } catch (erro) {
-        console.error('❌ Erro ao carregar histórico:', erro);
-        historico = [];
+        await fs.access(HISTORICO_PATH);
+        console.log('✅ historico.json encontrado');
+    } catch {
+        console.log('⚠️ historico.json não existe. Criando...');
+        await fs.writeFile(HISTORICO_PATH, JSON.stringify([], null, 2));
+        console.log('✅ historico.json criado com sucesso');
     }
 }
 
-let dadosCache = null;
-
-// Função para salvar histórico no arquivo
-function salvarHistorico() {
+// ========================================
+// FUNÇÃO: Ler histórico
+// ========================================
+async function lerHistorico() {
     try {
-        fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historico, null, 2));
-        console.log('💾 Histórico salvo no arquivo');
-    } catch (erro) {
-        console.error('❌ Erro ao salvar histórico:', erro);
+        await garantirHistorico();
+        const data = await fs.readFile(HISTORICO_PATH, 'utf-8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('❌ Erro ao ler histórico:', error);
+        return [];
     }
 }
 
-// Função para limpar registros antigos (mais de 7 dias)
-function limparHistoricoAntigo() {
-    const seteDiasAtras = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    const tamanhoAntes = historico.length;
-
-    historico = historico.filter(registro => {
-        const timestamp = new Date(registro.timestamp).getTime();
-        return timestamp > seteDiasAtras;
-    });
-
-    if (historico.length < tamanhoAntes) {
-        console.log(`🗑️ Removidos ${tamanhoAntes - historico.length} registros antigos`);
-        salvarHistorico();
+// ========================================
+// FUNÇÃO: Salvar histórico
+// ========================================
+async function salvarHistorico(dados) {
+    try {
+        await fs.writeFile(HISTORICO_PATH, JSON.stringify(dados, null, 2));
+        console.log('✅ Histórico salvo com sucesso');
+    } catch (error) {
+        console.error('❌ Erro ao salvar histórico:', error);
     }
 }
 
-// Função para raspar dados
+// ========================================
+// FUNÇÃO: Raspar dados do pizzint.watch
+// ========================================
 async function rasparDados() {
-    console.log('🔍 Coletando dados do pizzint.watch...');
-
-    const browser = await chromium.launch({ 
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
+    let browser;
     try {
+        console.log('🚀 Iniciando raspagem...');
+
+        browser = await chromium.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+
+        const page = await browser.newPage();
         await page.goto('https://www.pizzint.watch', { 
             waitUntil: 'networkidle',
             timeout: 30000 
         });
 
-        await page.waitForTimeout(3000);
+        // Aguardar elementos carregarem
+        await page.waitForSelector('.pizzaria-card', { timeout: 10000 });
 
-        const html = await page.content();
+        // Extrair dados
+        const dados = await page.evaluate(() => {
+            const pizzarias = {};
+            const cards = document.querySelectorAll('.pizzaria-card');
 
-        // Função auxiliar para extrair valores
-        function extrair(nome) {
-            const regex = new RegExp(`${nome}.*?(\\d+)`, 'i');
-            const match = html.match(regex);
-            return match ? Number(match[1]) : 50;
-        }
+            cards.forEach(card => {
+                const nome = card.querySelector('h3')?.textContent.trim();
+                const valorTexto = card.querySelector('.pizzaria-value')?.textContent.trim();
+                const valor = parseInt(valorTexto);
 
-        // Extrair dados das 6 pizzarias
-        const pizzarias = {
-            dominos: { 
-                valor: extrair('Domino'),
-                anomalia: false 
-            },
-            extreme: { 
-                valor: extrair('Extreme Pizza'),
-                anomalia: false 
-            },
-            district: { 
-                valor: extrair('District Pizza Palace'),
-                anomalia: false 
-            },
-            we_the_pizza: { 
-                valor: extrair('We, The Pizza'),
-                anomalia: false 
-            },
-            pizzero: { 
-                valor: extrair('Pizzero Pizza'),
-                anomalia: false 
-            },
-            papa_johns: { 
-                valor: extrair('Papa Johns Pizza'),
-                anomalia: false 
-            }
-        };
+                if (nome && !isNaN(valor)) {
+                    const nomeNormalizado = nome.toLowerCase()
+                        .replace(/[^a-z0-9]/g, '_')
+                        .replace(/_+/g, '_');
+
+                    pizzarias[nomeNormalizado] = {
+                        valor: valor,
+                        anomalia: false
+                    };
+                }
+            });
+
+            return pizzarias;
+        });
 
         await browser.close();
 
         // Detectar anomalias
-        let temAnomalia = false;
-        for (const [key, pizzaria] of Object.entries(pizzarias)) {
-            const anomalia = detectarAnomalia(key, pizzaria.valor);
-            pizzarias[key].anomalia = anomalia;
-            if (anomalia) temAnomalia = true;
-        }
+        const valores = Object.values(dados).map(p => p.valor);
+        const media = valores.reduce((a, b) => a + b, 0) / valores.length;
+        const desvio = Math.sqrt(valores.reduce((sum, val) => sum + Math.pow(val - media, 2), 0) / valores.length);
 
-        // Criar registro atual
-        const registroAtual = {
+        let temAnomalia = false;
+        Object.keys(dados).forEach(key => {
+            const diff = Math.abs(dados[key].valor - media);
+            if (diff > 2 * desvio) {
+                dados[key].anomalia = true;
+                temAnomalia = true;
+            }
+        });
+
+        const resultado = {
             timestamp: new Date().toISOString(),
-            pizzarias,
-            temAnomalia
+            pizzarias: dados,
+            temAnomalia: temAnomalia
         };
 
-        // Atualizar cache
-        dadosCache = registroAtual;
+        console.log('✅ Raspagem concluída:', resultado);
+        return resultado;
 
-        // Adicionar ao histórico
-        historico.push(registroAtual);
-
-        // Limpar registros antigos
-        limparHistoricoAntigo();
-
-        // Salvar no arquivo
-        salvarHistorico();
-
-        console.log(`✅ Dados coletados com sucesso! Total no histórico: ${historico.length}`);
-
-    } catch (erro) {
-        console.error('❌ Erro ao raspar dados:', erro);
-        await browser.close();
-        throw erro;
+    } catch (error) {
+        console.error('❌ Erro na raspagem:', error.message);
+        if (browser) await browser.close();
+        return null;
     }
 }
 
-// Função para detectar anomalia
-function detectarAnomalia(pizzaria, valorAtual) {
-    // Pegar os últimos 20 valores dessa pizzaria
-    const valoresAnteriores = historico
-        .map(h => h.pizzarias[pizzaria]?.valor)
-        .filter(v => v !== undefined)
-        .slice(-20);
-
-    if (valoresAnteriores.length < 5) return false;
-
-    // Calcular média
-    const media = valoresAnteriores.reduce((a, b) => a + b, 0) / valoresAnteriores.length;
-
-    // Calcular desvio padrão
-    const variancia = valoresAnteriores.reduce((sum, val) => 
-        sum + Math.pow(val - media, 2), 0) / valoresAnteriores.length;
-    const desvio = Math.sqrt(variancia);
-
-    if (desvio === 0) return false;
-
-    // Calcular Z-Score
-    const zScore = Math.abs((valorAtual - media) / desvio);
-
-    // Anomalia se Z-Score > 2.5
-    return zScore > 2.5;
-}
-
 // ========================================
-// ROTAS DA API
+// FUNÇÃO: Atualizar histórico
 // ========================================
-
-// Rota principal: dados atuais
-app.get('/api/pizzas', (req, res) => {
-    if (!dadosCache && historico.length === 0) {
-        return res.status(503).json({ 
-            erro: 'Dados ainda não disponíveis. Aguarde a primeira coleta.' 
-        });
-    }
-
-    // Se não tem cache mas tem histórico, retorna o último registro
-    const dados = dadosCache || historico[historico.length - 1];
-
-    res.json(dados);
-});
-
-// Rota: histórico completo (últimos 7 dias)
-app.get('/api/historico', (req, res) => {
-    res.json({
-        total: historico.length,
-        registros: historico
-    });
-});
-
-// Rota: histórico resumido (últimas 50 leituras)
-app.get('/api/historico/resumido', (req, res) => {
-    const ultimos50 = historico.slice(-50);
-    res.json({
-        total: ultimos50.length,
-        registros: ultimos50
-    });
-});
-
-// Rota: histórico por dia
-app.get('/api/historico/dia/:data', (req, res) => {
-    const dataRequisitada = req.params.data; // formato: YYYY-MM-DD
-
-    const registrosDoDia = historico.filter(registro => {
-        const dataRegistro = new Date(registro.timestamp).toISOString().split('T')[0];
-        return dataRegistro === dataRequisitada;
-    });
-
-    res.json({
-        data: dataRequisitada,
-        total: registrosDoDia.length,
-        registros: registrosDoDia
-    });
-});
-
-// Rota: estatísticas
-app.get('/api/estatisticas', (req, res) => {
-    if (historico.length === 0) {
-        return res.json({ erro: 'Sem dados históricos' });
-    }
-
-    // Calcular estatísticas por pizzaria
-    const stats = {};
-
-    for (const pizzaria of ['dominos', 'extreme', 'district', 'we_the_pizza', 'pizzero', 'papa_johns']) {
-        const valores = historico
-            .map(h => h.pizzarias[pizzaria]?.valor)
-            .filter(v => v !== undefined);
-
-        if (valores.length > 0) {
-            const media = valores.reduce((a, b) => a + b, 0) / valores.length;
-            const max = Math.max(...valores);
-            const min = Math.min(...valores);
-
-            stats[pizzaria] = {
-                media: media.toFixed(2),
-                max,
-                min,
-                total_leituras: valores.length
-            };
-        }
-    }
-
-    res.json({
-        periodo: {
-            inicio: historico[0].timestamp,
-            fim: historico[historico.length - 1].timestamp
-        },
-        total_registros: historico.length,
-        pizzarias: stats
-    });
-});
-
-// Rota: status do sistema
-app.get('/api/status', (req, res) => {
-    res.json({
-        status: 'online',
-        ultima_coleta: dadosCache?.timestamp,
-        total_historico: historico.length,
-        periodo_historico_dias: 7,
-        proximo_update: 'A cada 5 minutos'
-    });
-});
-
-// Rota: forçar coleta manual
-app.post('/api/coletar', async (req, res) => {
+async function atualizarHistorico() {
     try {
-        await rasparDados();
-        res.json({ 
-            sucesso: true, 
-            mensagem: 'Coleta realizada com sucesso',
-            dados: dadosCache 
-        });
-    } catch (erro) {
-        res.status(500).json({ 
-            sucesso: false, 
-            erro: erro.message 
-        });
-    }
-});
+        const novosDados = await rasparDados();
+        if (!novosDados) {
+            console.log('⚠️ Raspagem falhou, mantendo histórico atual');
+            return;
+        }
 
-// ========================================
-// INICIALIZAÇÃO
-// ========================================
+        const historico = await lerHistorico();
+        historico.push(novosDados);
 
-// Coleta inicial
-rasparDados().catch(console.error);
+        // Manter apenas últimos 7 dias (288 registros = 7 dias * 24h * 12 coletas/hora)
+        const LIMITE = 288;
+        if (historico.length > LIMITE) {
+            historico.splice(0, historico.length - LIMITE);
+        }
 
-// Agendar coleta a cada 5 minutos
-setInterval(() => {
-    rasparDados().catch(console.error);
-}, 5 * 60 * 1000);
+        await salvarHistorico(historico);
+        console.log(`✅ Histórico atualizado: ${historico.length} registros`);
 
-// Limpar histórico antigo a cada 1 hora
-setInterval(() => {
-    limparHistoricoAntigo();
-}, 60 * 60 * 1000);
+    } catch (error) {
+        console.error('❌ Erro ao atualizar histórico:', error);
 
-// Iniciar servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Backend rodando na porta ${PORT}`);
-    console.log(`📊 Histórico: ${historico.length} registros`);
-    console.log(`⏰ Coleta automática a cada 5 minutos`);
-});
 
