@@ -48,9 +48,11 @@ async function rasparDados() {
     try {
         console.log('🚀 Iniciando raspagem...');
 
+        const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome';
+
         browser = await puppeteer.launch({
-            headless: true,
-            executablePath: '/usr/bin/chromium',
+            headless: "new",
+            executablePath: executablePath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
