@@ -49,9 +49,15 @@ async function rasparDados() {
         console.log('🚀 Iniciando raspagem...');
 
         browser = await chromium.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+    headless: true,
+    executablePath: '/usr/bin/chromium-browser',
+    args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+    ]
+});
 
         const page = await browser.newPage();
         await page.goto('https://www.pizzint.watch', { 
