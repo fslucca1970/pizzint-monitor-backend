@@ -1,8 +1,8 @@
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const fs = require('fs').promises;
-const path = require('path');
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const { getPopularTimes } = require("./popularTimes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,323 +10,198 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-const HISTORICO_PATH = path.join(__dirname, 'historico.json');
+const HISTORICO_PATH = path.join(__dirname, "historico.json");
 
-// Mapeamento das 6 pizzarias
-const PIZZARIAS = {
-  dominos: {
+// Lista de pizzarias monitoradas
+const PIZZARIAS = [
+  {
+    id: "domino_s_pizza",
     nome: "Domino's Pizza",
-    placeId: 'ChIJI6ACK7q2t4kRFcPtFhUuYhU',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJI6ACK7q2t4kRFcPtFhUuYhU&dayOfWeek=0'
+    place_id: "ChIJVcXB3xG3t4kRLW_u6TuJNew",
   },
-  extreme: {
-    nome: 'Extreme Pizza',
-    placeId: 'ChIJcYireCe3t4kR4d9trEbGYjc',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJcYireCe3t4kR4d9trEbGYjc&dayOfWeek=0'
+  {
+    id: "extreme_pizza",
+    nome: "Extreme Pizza",
+    place_id: "ChIJwQoN1hG3t4kRxwGkKNnYXFg",
   },
-  district: {
-    nome: 'District Pizza Palace',
-    placeId: 'ChIJ42QeLXu3t4kRnArvcaz2o3A',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJ42QeLXu3t4kRnArvcaz2o3A&dayOfWeek=0'
+  {
+    id: "district_pizza_palace",
+    nome: "District Pizza Palace",
+    place_id: "ChIJH8yqnhG3t4kRWHBTmYJGJgc",
   },
-  we_the_pizza: {
-    nome: 'We, the Pizza',
-    placeId: 'ChIJS1rpOC-3t4kRsLyM6aftM8k',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJS1rpOC-3t4kRsLyM6aftM8k&dayOfWeek=0'
+  {
+    id: "we__the_pizza",
+    nome: "We, the Pizza",
+    place_id: "ChIJZzBtqxG3t4kRdLO-Gg6VJzk",
   },
-  pizzato: {
-    nome: 'Pizzato Pizza',
-    placeId: 'ChIJrbin_Qm3t4kRVSytw_2DM1g',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJrbin_Qm3t4kRVSytw_2DM1g&dayOfWeek=0'
+  {
+    id: "pizzato_pizza",
+    nome: "Pizzato Pizza",
+    place_id: "ChIJGQwYkRG3t4kRWNkr-Zy0Ixo",
   },
-  papa_johns: {
+  {
+    id: "papa_john_s_pizza",
     nome: "Papa John's Pizza",
-    placeId: 'ChIJo03BaX-3t4kRbyhPM0rTuqM',
-    url: 'https://www.pizzint.watch/api/chart-data?placeId=ChIJo03BaX-3t4kRbyhPM0rTuqM&dayOfWeek=0'
-  }
-};
+    place_id: "ChIJe5LCoBG3t4kRhj7Rl0XUNLc",
+  },
+];
 
-async function garantirHistorico() {
+// Carrega histórico existente
+function carregarHistorico() {
   try {
-    await fs.access(HISTORICO_PATH);
-    console.log('✅ historico.json encontrado');
-  } catch {
-    console.log('⚠️ historico.json não existe. Criando...');
-    await fs.writeFile(HISTORICO_PATH, JSON.stringify([], null, 2));
-    console.log('✅ historico.json criado com sucesso');
-  }
-}
-
-async function lerHistorico() {
-  try {
-    await garantirHistorico();
-    const data = await fs.readFile(HISTORICO_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('❌ Erro ao ler histórico:', error);
-    return [];
-  }
-}
-
-async function salvarHistorico(dados) {
-  try {
-    await fs.writeFile(HISTORICO_PATH, JSON.stringify(dados, null, 2));
-    console.log('✅ Histórico salvo com sucesso');
-  } catch (error) {
-    console.error('❌ Erro ao salvar histórico:', error);
-  }
-}
-
-function calcularStatus(popularTimes) {
-  if (!popularTimes || popularTimes.length === 0) {
-    return { status: 'UNKNOWN', movimento_atual: 0 };
-  }
-
-  const agora = new Date();
-  const horaAtual = agora.getHours();
-
-  // Pega o valor da hora atual
-  const movimentoAtual = popularTimes[horaAtual] || 0;
-
-  // Calcula média do dia
-  const media = popularTimes.reduce((a, b) => a + b, 0) / popularTimes.length;
-
-  // Calcula desvio padrão
-  const variancia = popularTimes.reduce((sum, val) => sum + Math.pow(val - media, 2), 0) / popularTimes.length;
-  const desvio = Math.sqrt(variancia);
-
-  // Determina status
-  let status = 'NOMINAL';
-
-  if (movimentoAtual > media + (1.5 * desvio)) {
-    status = 'SPIKE';
-  } else if (movimentoAtual < media - (0.5 * desvio)) {
-    status = 'QUIET';
-  }
-
-  return { status, movimento_atual: movimentoAtual };
-}
-
-async function coletarDadosPizzaria(pizzaria) {
-  try {
-    console.log(`📡 Coletando dados de ${pizzaria.nome}...`);
-
-    const response = await axios.get(pizzaria.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.pizzint.watch/',
-        'Origin': 'https://www.pizzint.watch'
-      },
-      timeout: 10000
-    });
-
-    const dados = response.data;
-
-    // Extrai popular times (array de 24 posições)
-    let popularTimes = [];
-
-    if (dados.data && Array.isArray(dados.data)) {
-      popularTimes = dados.data;
-    } else if (dados.popularTimes && Array.isArray(dados.popularTimes)) {
-      popularTimes = dados.popularTimes;
-    } else if (Array.isArray(dados)) {
-      popularTimes = dados;
+    if (fs.existsSync(HISTORICO_PATH)) {
+      const data = fs.readFileSync(HISTORICO_PATH, "utf-8");
+      return JSON.parse(data);
     }
-
-    const { status, movimento_atual } = calcularStatus(popularTimes);
-
-    return {
-      nome: pizzaria.nome,
-      placeId: pizzaria.placeId,
-      status: status,
-      movimento_atual: movimento_atual,
-      popular_times: popularTimes,
-      aberto: dados.isOpen !== false,
-      timestamp: new Date().toISOString(),
-      sucesso: true
-    };
-
-  } catch (error) {
-    console.error(`❌ Erro ao coletar ${pizzaria.nome}:`, error.message);
-
-    return {
-      nome: pizzaria.nome,
-      placeId: pizzaria.placeId,
-      status: 'ERROR',
-      movimento_atual: 0,
-      popular_times: [],
-      aberto: null,
-      timestamp: new Date().toISOString(),
-      sucesso: false,
-      erro: error.message
-    };
+  } catch (erro) {
+    console.error("Erro ao carregar histórico:", erro);
   }
+  return [];
 }
 
-async function atualizarDados() {
+// Salva histórico
+function salvarHistorico(historico) {
   try {
-    console.log('\n🚀 Iniciando coleta de dados...');
-    console.log(`⏰ ${new Date().toLocaleString('pt-BR')}`);
+    // Mantém apenas os últimos 200 registros no histórico
+    const LIMITE = 200;
 
-    const coleta = {
-      timestamp: new Date().toISOString(),
-      pizzarias: {}
-    };
-
-    // Coleta dados de todas as 6 pizzarias em paralelo
-    const promises = Object.values(PIZZARIAS).map(pizzaria => 
-      coletarDadosPizzaria(pizzaria)
-    );
-
-    const resultados = await Promise.all(promises);
-
-    // Organiza os resultados
-    resultados.forEach(resultado => {
-      const chave = resultado.nome.toLowerCase().replace(/[^a-z0-9]/g, '_');
-      coleta.pizzarias[chave] = resultado;
-    });
-
-    // Detecta anomalias (SPIKE)
-    const comSpike = resultados.filter(p => p.status === 'SPIKE');
-    if (comSpike.length > 0) {
-      coleta.anomalias = {
-        detectadas: true,
-        pizzarias_em_spike: comSpike.map(p => p.nome)
-      };
-      console.log(`⚠️ SPIKE DETECTADO EM: ${comSpike.map(p => p.nome).join(', ')}`);
-    }
-
-    // Salva no histórico
-    const historico = await lerHistorico();
-    historico.push(coleta);
-
-    // Mantém apenas 7 dias de histórico (2016 coletas = 7 dias * 288 coletas/dia)
-    const  = 200;
     if (historico.length > LIMITE) {
       historico.splice(0, historico.length - LIMITE);
     }
 
-    await salvarHistorico(historico);
-    console.log(`✅ Coleta concluída: ${historico.length} registros no histórico`);
-
-    return coleta;
-
-  } catch (error) {
-    console.error('❌ Erro ao atualizar dados:', error);
-    return null;
+    fs.writeFileSync(HISTORICO_PATH, JSON.stringify(historico, null, 2));
+    console.log(`✅ Histórico salvo com ${historico.length} registros`);
+  } catch (erro) {
+    console.error("❌ Erro ao salvar histórico:", erro);
   }
 }
 
-// ============ ROTAS DA API ============
+// Coleta dados de todas as pizzarias
+async function coletarDados() {
+  console.log("🔄 Iniciando coleta de dados...");
 
-app.get('/api/status', async (req, res) => {
-  try {
-    const historico = await lerHistorico();
-    const ultimaColeta = historico.length > 0 
-      ? historico[historico.length - 1].timestamp 
-      : null;
+  const resultados = {};
+  const timestamp = new Date().toISOString();
 
-    res.json({
-      status: 'online',
-      ultima_coleta: ultimaColeta,
-      total_registros_historico: historico.length,
-      periodo_historico_dias: 7,
-      proxima_coleta: 'A cada 5 minutos',
-      pizzarias_monitoradas: Object.keys(PIZZARIAS).length
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  for (const pizzaria of PIZZARIAS) {
+    try {
+      console.log(`📍 Coletando dados de ${pizzaria.nome}...`);
+
+      const dados = await getPopularTimes(pizzaria.place_id);
+
+      if (dados && dados.current_popularity !== undefined) {
+        const baseline = dados.populartimes?.find(
+          (day) => day.name === dados.time_spent?.[0]?.name
+        );
+
+        const horaAtual = new Date().getHours();
+        const popularidadeBaseline =
+          baseline?.data?.[horaAtual] || dados.current_popularity;
+
+        // Determina status
+        let status = "NOMINAL";
+        if (dados.current_popularity < popularidadeBaseline * 0.7) {
+          status = "QUIET";
+        } else if (dados.current_popularity > popularidadeBaseline * 1.3) {
+          status = "SPIKE";
+        }
+
+        resultados[pizzaria.id] = {
+          nome: pizzaria.nome,
+          place_id: pizzaria.place_id,
+          status: status,
+          movimento_atual: {
+            hour: horaAtual,
+            baseline_popularity: popularidadeBaseline,
+            current_popularity: dados.current_popularity,
+          },
+          popular_times: dados.populartimes?.map((day) => ({
+            name: day.name,
+            data: day.data,
+          })),
+        };
+
+        console.log(
+          `✅ ${pizzaria.nome}: ${dados.current_popularity}% (${status})`
+        );
+      } else {
+        console.log(`⚠️ ${pizzaria.nome}: Sem dados disponíveis`);
+        resultados[pizzaria.id] = {
+          nome: pizzaria.nome,
+          place_id: pizzaria.place_id,
+          status: "UNKNOWN",
+          movimento_atual: null,
+          popular_times: null,
+        };
+      }
+    } catch (erro) {
+      console.error(`❌ Erro ao coletar ${pizzaria.nome}:`, erro.message);
+      resultados[pizzaria.id] = {
+        nome: pizzaria.nome,
+        place_id: pizzaria.place_id,
+        status: "ERROR",
+        movimento_atual: null,
+        popular_times: null,
+        erro: erro.message,
+      };
+    }
   }
-});
 
-app.get('/api/atual', async (req, res) => {
+  // Salva no histórico
+  const historico = carregarHistorico();
+  historico.push({
+    timestamp,
+    pizzarias: resultados,
+  });
+  salvarHistorico(historico);
+
+  console.log("✅ Coleta concluída e salva no histórico");
+  return { timestamp, pizzarias: resultados };
+}
+
+// Endpoint: dados atuais
+app.get("/api/atual", (req, res) => {
   try {
-    const historico = await lerHistorico();
+    const historico = carregarHistorico();
 
     if (historico.length === 0) {
-      return res.status(404).json({ 
-        error: 'Nenhum dado disponível ainda. Aguarde a primeira coleta.' 
+      return res.status(404).json({
+        erro: "Nenhum dado disponível ainda",
       });
     }
 
-    res.json(historico[historico.length - 1]);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const ultimaColeta = historico[historico.length - 1];
+    res.json(ultimaColeta);
+  } catch (erro) {
+    console.error("Erro ao buscar dados atuais:", erro);
+    res.status(500).json({ erro: "Erro ao buscar dados" });
   }
 });
 
-app.get('/api/historico', async (req, res) => {
+// Endpoint: histórico completo
+app.get("/api/historico", (req, res) => {
   try {
-    const historico = await lerHistorico();
-    res.json({
-      total: historico.length,
-      registros: historico
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const historico = carregarHistorico();
+    res.json(historico);
+  } catch (erro) {
+    console.error("Erro ao buscar histórico:", erro);
+    res.status(500).json({ erro: "Erro ao buscar histórico" });
   }
 });
 
-app.get('/api/historico/:pizzaria', async (req, res) => {
-  try {
-    const { pizzaria } = req.params;
-    const historico = await lerHistorico();
-
-    const dados = historico
-      .map(coleta => ({
-        timestamp: coleta.timestamp,
-        dados: coleta.pizzarias[pizzaria]
-      }))
-      .filter(item => item.dados);
-
-    if (dados.length === 0) {
-      return res.status(404).json({ 
-        error: `Nenhum dado encontrado para ${pizzaria}` 
-      });
-    }
-
-    res.json({
-      pizzaria: pizzaria,
-      total_registros: dados.length,
-      registros: dados
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// Endpoint: health check
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-app.get('/api/spike', async (req, res) => {
-  try {
-    const historico = await lerHistorico();
-
-    const spikes = historico
-      .filter(coleta => coleta.anomalias?.detectadas)
-      .map(coleta => ({
-        timestamp: coleta.timestamp,
-        pizzarias_em_spike: coleta.anomalias.pizzarias_em_spike
-      }));
-
-    res.json({
-      total_spikes_detectados: spikes.length,
-      spikes: spikes
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ INICIALIZAÇÃO ============
-
-app.listen(PORT, async () => {
+// Inicia servidor
+app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📍 URL: https://pizzint-monitor-backend.onrender.com`);
 
-  await garantirHistorico();
-
-  console.log('⏳ Iniciando primeira coleta...');
-  await atualizarDados();
+  // Coleta inicial
+  coletarDados();
 
   // Coleta a cada 5 minutos
-  setInterval(atualizarDados, 5 * 60 * 1000);
-  console.log('✅ Coletas agendadas a cada 5 minutos');
+  setInterval(coletarDados, 5 * 60 * 1000);
 });
+
