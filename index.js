@@ -201,7 +201,7 @@ async function atualizarDados() {
     historico.push(coleta);
 
     // Mantém apenas 7 dias de histórico (2016 coletas = 7 dias * 288 coletas/dia)
-    const LIMITE = 2016;
+    const  = 200;
     if (historico.length > LIMITE) {
       historico.splice(0, historico.length - LIMITE);
     }
