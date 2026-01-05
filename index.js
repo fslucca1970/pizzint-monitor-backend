@@ -59,12 +59,32 @@ async function rasparDados() {
         console.log('✅ Browser lançado com sucesso');
 
         const page = await browser.newPage();
-        await page.goto('https://www.pizzint.watch', { 
-            waitUntil: 'networkidle2',
-            timeout: 30000 
+
+        // User-agent real para evitar bloqueios
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+
+        // Desabilita imagens e CSS para acelerar
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if(['image', 'stylesheet', 'font'].includes(req.resourceType())){
+                req.abort();
+            } else {
+                req.continue();
+            }
         });
 
-        await page.waitForSelector('.pizzaria-card', { timeout: 10000 });
+        console.log('⏳ Navegando para pizzint.watch...');
+
+        await page.goto('https://www.pizzint.watch', { 
+            waitUntil: 'domcontentloaded',
+            timeout: 60000 
+        });
+
+        console.log('✅ Página carregada');
+
+        await page.waitForSelector('.pizzaria-card', { timeout: 20000 });
+
+        console.log('✅ Cards encontrados');
 
         const dados = await page.evaluate(() => {
             const pizzarias = {};
