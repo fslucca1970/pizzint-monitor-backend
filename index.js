@@ -77,27 +77,71 @@ async function salvarHistorico(dados) {
   }
 }
 
+function calcularStatus(popularTimes) {
+  if (!popularTimes || popularTimes.length === 0) {
+    return { status: 'UNKNOWN', movimento_atual: 0 };
+  }
+
+  const agora = new Date();
+  const horaAtual = agora.getHours();
+
+  // Pega o valor da hora atual
+  const movimentoAtual = popularTimes[horaAtual] || 0;
+
+  // Calcula média do dia
+  const media = popularTimes.reduce((a, b) => a + b, 0) / popularTimes.length;
+
+  // Calcula desvio padrão
+  const variancia = popularTimes.reduce((sum, val) => sum + Math.pow(val - media, 2), 0) / popularTimes.length;
+  const desvio = Math.sqrt(variancia);
+
+  // Determina status
+  let status = 'NOMINAL';
+
+  if (movimentoAtual > media + (1.5 * desvio)) {
+    status = 'SPIKE';
+  } else if (movimentoAtual < media - (0.5 * desvio)) {
+    status = 'QUIET';
+  }
+
+  return { status, movimento_atual: movimentoAtual };
+}
+
 async function coletarDadosPizzaria(pizzaria) {
   try {
     console.log(`📡 Coletando dados de ${pizzaria.nome}...`);
 
     const response = await axios.get(pizzaria.url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.pizzint.watch/',
+        'Origin': 'https://www.pizzint.watch'
       },
       timeout: 10000
     });
 
     const dados = response.data;
 
+    // Extrai popular times (array de 24 posições)
+    let popularTimes = [];
+
+    if (dados.data && Array.isArray(dados.data)) {
+      popularTimes = dados.data;
+    } else if (dados.popularTimes && Array.isArray(dados.popularTimes)) {
+      popularTimes = dados.popularTimes;
+    } else if (Array.isArray(dados)) {
+      popularTimes = dados;
+    }
+
+    const { status, movimento_atual } = calcularStatus(popularTimes);
+
     return {
       nome: pizzaria.nome,
       placeId: pizzaria.placeId,
-      status: dados.status || 'UNKNOWN',
-      movimento_atual: dados.currentPopularity || 0,
-      popular_times: dados.popularTimes || [],
+      status: status,
+      movimento_atual: movimento_atual,
+      popular_times: popularTimes,
       aberto: dados.isOpen !== false,
-      horario_abre: dados.openingHours?.weekday_text?.[0] || 'N/A',
       timestamp: new Date().toISOString(),
       sucesso: true
     };
@@ -112,7 +156,6 @@ async function coletarDadosPizzaria(pizzaria) {
       movimento_atual: 0,
       popular_times: [],
       aberto: null,
-      horario_abre: 'N/A',
       timestamp: new Date().toISOString(),
       sucesso: false,
       erro: error.message
@@ -287,4 +330,3 @@ app.listen(PORT, async () => {
   setInterval(atualizarDados, 5 * 60 * 1000);
   console.log('✅ Coletas agendadas a cada 5 minutos');
 });
-
